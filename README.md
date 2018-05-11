@@ -1,2 +1,2 @@
 # ga2018s
-Genetic Algorithm HW
+> Worked by [cseteram](https://github.com/cseteram) in Genetic Algorithm (4190.681A, 2018 spring) of SNU.
