@@ -8,6 +8,7 @@
 
 using namespace std;
 typedef pair<int, int> pii;
+typedef pair<int, pii> pipii;
 typedef vector<int> chromosome;
 
 int num_local_search = 0;
@@ -28,6 +29,7 @@ private:
     
     const int v;
     const vector<vector<pii>> graph;
+    const vector<pipii> edges;
     const vector<chromosome> initial_populations;
 
     int generation;
@@ -43,18 +45,18 @@ private:
 public:
     bool print_status = false;
 
-    GA(double, int, int, double, double, double, vector<vector<pii>>, vector<chromosome>);
+    GA(double, int, int, double, double, double, vector<vector<pii>>, vector<pipii>, vector<chromosome>);
     chromosome Run();
 };
 
 // Functions for local search
-void LocalSearch(const vector<vector<pii>> &graph, chromosome &x);
+void LocalSearch(const vector<vector<pii>> &graph, const vector<pipii> &edges, chromosome &x);
 
 // Functions for multi-start local search
 chromosome MultiStartLocalSearch(int n);
 
 // Functions for main
-void Input(char *input, vector<vector<pii>> &graph);
+void Input(char *input, vector<vector<pii>> &graph, vector<pipii> &edges);
 void Output(char *output);
 
 double GetTime()
@@ -100,9 +102,9 @@ int Evaluate(const vector<vector<pii>> &graph, chromosome &sol)
     return ret;
 }
 
-GA::GA(double du, int n, int k, double kp, double p0c, double p0m, vector<vector<pii>> g, vector<chromosome> x)
+GA::GA(double du, int n, int k, double kp, double p0c, double p0m, vector<vector<pii>> g, vector<pipii> e, vector<chromosome> x)
     : ga_duration(du), n_populations(n), k_new_populations(k), k_selection_pressure(kp),
-      p0_uniform_crossover(p0c), p0_mutation(p0m), v((int)g.size()), graph(g), initial_populations(x)
+      p0_uniform_crossover(p0c), p0_mutation(p0m), v((int)g.size()), graph(g), edges(e), initial_populations(x)
 {
 
 }
@@ -221,7 +223,7 @@ chromosome GA::Run()
         }
 
         for (int i = 0; i < k_new_populations; ++i)
-            LocalSearch(graph, new_populations[i]);
+            LocalSearch(graph, edges, new_populations[i]);
         
         Replace(new_populations);
         
@@ -242,34 +244,70 @@ chromosome GA::Run()
     printf("\nLast Score => %d\n", scores[i]);
 }
 
-void LocalSearch(const vector<vector<pii>> &graph, chromosome &sol)
+void LocalSearch(const vector<vector<pii>> &graph, const vector<pipii> &edges, chromosome &sol)
 {
     int n = (int)sol.size();
-    vector<int> sigma(n);
+    vector<pipii> sigma;
     for (int i = 0; i < n; ++i)
-        sigma[i] = i;
+        sigma.push_back(pipii(0, pii(i, i)));
+    for (int i = 0; i < (int)edges.size(); ++i) {
+        int w = edges[i].first, u = edges[i].second.first, v = edges[i].second.second;
+        sigma.push_back(pipii(w, pii(u, v)));
+    }
 
-    // generate a random permutation sigma of {1, ..., |V|}
+    // generate a random permutation sigma of {1, ..., |V|, ...}
     random_shuffle(sigma.begin(), sigma.end());
     bool improved = true;
 
     while (improved) {
         improved = false;
-        for (int i = 0; i < n; ++i) {
-            int here = sigma[i], delta = 0;
-            for (auto &p : graph[here]) {
-                int there, w;
-                tie(there, w) = p;
+        for (int i = 0; i < (int)sigma.size(); ++i) {
+            int x = sigma[i].first, u = sigma[i].second.first, v = sigma[i].second.second;
+            if (u == v) { // 1-bit flip
+                int here = u, delta = 0;
+                for (auto &p : graph[here]) {
+                    int there, w;
+                    tie(there, w) = p;
 
-                if (sol[here] == sol[there])
-                    delta += w;
-                else
-                    delta -= w;
+                    if (sol[here] == sol[there])
+                        delta += w;
+                    else
+                        delta -= w;
+                }
+                
+                if (delta > 0) {
+                    sol[here] ^= 1;
+                    improved = true;
+                }
             }
-            
-            if (delta > 0) {
-                sol[here] ^= 1;
-                improved = true;
+            else { // 2-bit flip
+                int weight = x, here1 = u, here2 = v, delta1 = 0, delta2 = 0;
+                for (auto &p : graph[here1]) {
+                    int there, w;
+                    tie(there, w) = p;
+
+                    if (sol[here1] == sol[there])
+                        delta1 += w;
+                    else
+                        delta1 -= w;
+                }
+                for (auto &p : graph[here2]) {
+                    int there, w;
+                    tie(there, w) = p;
+
+                    if (sol[here2] == sol[there])
+                        delta2 += w;
+                    else
+                        delta2 -= w;
+                }
+
+                int sgn = (sol[here1] == sol[here2]) ? 1 : -1;
+                int delta = delta1 + delta2 - 2 * sgn * weight;
+                if (delta > 0) {
+                    sol[here1] ^= 1;
+                    sol[here2] ^= 1;
+                    improved = true;
+                }
             }
         }
     }
@@ -277,7 +315,7 @@ void LocalSearch(const vector<vector<pii>> &graph, chromosome &sol)
     ++num_local_search;
 }
 
-chromosome MultiStartLocalSearch(vector<vector<pii>> &graph, int n)
+chromosome MultiStartLocalSearch(vector<vector<pii>> &graph, vector<pipii> &edges, int n)
 {
     int v = (int)graph.size();
     chromosome ans;
@@ -288,7 +326,7 @@ chromosome MultiStartLocalSearch(vector<vector<pii>> &graph, int n)
         chromosome x(v);
         for (int i = 0; i < v; ++i)
             x[i] = rand() % 2;
-        LocalSearch(graph, x);
+        LocalSearch(graph, edges, x);
         int score = Evaluate(graph, x);
         if (score > max_score) {
             ans = x;
@@ -299,7 +337,7 @@ chromosome MultiStartLocalSearch(vector<vector<pii>> &graph, int n)
     return ans;
 }
 
-void Input(char *input, vector<vector<pii>> &graph)
+void Input(char *input, vector<vector<pii>> &graph, vector<pair<int, pii>> &edges)
 {
     FILE *in = fopen(input, "r");
     if (in == NULL) {
@@ -316,6 +354,8 @@ void Input(char *input, vector<vector<pii>> &graph)
         --x, --y;
         graph[x].push_back({y, w});
         graph[y].push_back({x, w});
+
+        edges.push_back({w, {x, y}});
     }
 }
 
@@ -345,39 +385,26 @@ int main(int argc, char **argv)
     }
 
     vector<vector<pii>> graph;
-    Input(argv[1], graph);
+    vector<pair<int, pii>> edges;
+    Input(argv[1], graph, edges);
 
     vector<chromosome> v;
 
-    GA layer1(1.0, 256, 32, 4, 0.5, 0.01, graph, v);
+    GA layer1(24.0, 64, 4, 4, 0.5, 0.1, graph, edges, v);
     layer1.print_status = true;
-    for (int i = 0; i < 64; ++i) {
+    for (int i = 0; i < 4; ++i) {
         chromosome x = layer1.Run();
         v.push_back(x);
     }
 
-    GA layer2(3.0, 512, 32, 4, 0.5, 0.01, graph, v);
+    GA layer2(400.0, 256, 16, 3, 0.5, 0.1, graph, edges, v);
     layer2.print_status = true;
-    for (int i = 0; i < 16; ++i) {
-        chromosome x = layer2.Run();
-        v.push_back(x);
-    }
-
-    GA layer3(20.0, 1024, 64, 4, 0.5, 0.01, graph, v);
-    layer3.print_status = true;
-    for (int i = 0; i < 3; ++i) {
-        chromosome x = layer3.Run();
-        v.push_back(x);
-    }
-
-    GA layer4(3.0, 1024, 64, 4, 0.5, 0.01, graph, v);
-    layer4.print_status = true;
-    chromosome x = layer4.Run();
+    chromosome x = layer2.Run();
 
     Output(argv[2], x);
 
     // printf("Local Search = %d\n", num_local_search);
-    // chromosome x = MultiStartLocalSearch(graph, 2686490);
+    // chromosome x = MultiStartLocalSearch(graph, edges, 2686490);
     // printf("Score = %d\n", Evaluate(graph, x));
 
     return 0;
